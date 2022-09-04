@@ -1,0 +1,3 @@
+import vote
+vote.article()
+
