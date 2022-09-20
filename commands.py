@@ -15,57 +15,62 @@ conn.append('name', 'append content')
 conn.getrange('a long string', 3, 2)  # get substring
 conn.setrange('a-new-storage', 3, 'd')
 conn.getbit('keyname', 2)  # 看成二进制位，取该位内容
-conn.setbit()
-conn.bitcount()
-conn.bitop()
+conn.setbit('key',2,1)
+conn.bitcount('need to count', 0, 4)  # 统计0-4之间的为1的位数量
+conn.bitop('and', 'destkey', 'key1', 'key2')
 
 
-conn.lindex()
-conn.ltrim()
-conn.lrange()
+conn.lindex('listName', 10)
+conn.ltrim('listName', 0, 5)  # 0-5之间的都会被包含
+conn.lrange('listName', 0, -1)
 
-
+# blocked:
+conn.blpop('keyName', 10)  # 等待10毫秒
+conn.brpop('keyName', 10)
+conn.rpoplpush('key1', 'key2')
+conn.brpoplpush('list1', 'list2', 30)
 
 
 #  set
-conn.sadd()
-conn.srem()
-conn.sismember()
-conn.scard()
-conn.smembers()
-conn.srandmember()
-conn.spop()
-conn.smove()
+conn.sadd('set-key', 'a', 'b', 'c')
+conn.srem('set-key', 'a', 'b')
+conn.sismember('list', 'item')
+conn.scard('set-key')
+conn.smembers('listKey')
+conn.srandmember('listKey', 20)
+conn.spop('key')  # 随机返回
+conn.smove('set-key1', 'set-key2', 'item')  # 把item 从 set-key1 移动到set-key2
 
-conn.sdiffstore()
-conn.sinter()
-conn.sinterstore()
-conn.sunion()
-conn.sunionstore()
+conn.sdiffstore('storekey', 'set1', 'set2', 'set3')  # 把item从存在于第一个集合但不存在于其他集合中的元素存入storekey中
+conn.sinter('sk1', 'sk2')  # 并集
+conn.sinterstore('destination', 'set1', 'set2')
+conn.sunion('k1', 'k2')  # 并集
+conn.sunionstore('destination', 'k1', 'k2')  # 并集存储
 
 
 # hash
-conn.hmget()
-conn.hmset()
-conn.hdel()
-conn.hlen()
+conn.hmget('key-name', 'key1', 'key2', 'key3')
+conn.hmset('key-name', 'key1', 'value1', 'key2', 'value2')
+conn.hdel('key-name', 'key1', 'key2', 'key3')
+conn.hlen('hash-key')  # 返回包含的值
 
-conn.exists()
-conn.hkeys()
-conn.hvals()
-conn.hgetall()
-conn.hincrby()
-conn.hincrbyfloat()
+conn.exists('hash-name', 'key')
+conn.hkeys('hash-name')
+conn.hvals('hash-name')
+conn.hgetall('key-name')
+conn.hincrby('keyname', 'key')
+conn.hincrbyfloat('keyname', 'key', 'increment')
 
 # zset
-conn.zadd()
-conn.zrem()
-conn.zcard()
-conn.zincrby()
-conn.zcount()
-conn.zrank()
-conn.zscore()
-conn.zrange()
+conn.zadd('zset-key', 'a', 3, 'b', 3, 'c', 4)
+conn.zrem('zset-key', 'a')
+conn.zcard('keyname')  # 返回有序集合包含的成员数量
+conn.zincrby('key-name', 10, 'member')
+conn.zcount('key-name', 10, 20)  # 找到10和20之间的成员数量
+conn.zrank('key-name', 'mem_name')  # 返回mem_name的排名
+conn.zscore('zset-key', 'member')  # 返回member的分值
+conn.zrange('zset-key', 10, 20)
+
 
 # pub/sub
 
@@ -120,6 +125,18 @@ if 1:
     for i in range(3):
         threading.Thread(target=trans).start()
     time.sleep(.5)
+
+
+# expire
+conn.persist('key-name')  # 移除键的过期时间
+conn.ttl('time')  # 看给定键距离过期需要多久
+conn.expire('keyName', 10)
+conn.expireat('key-name', 10000)  # 设定UNIX时间戳
+conn.pttl('key-name')  # 查看距离过期需要多少毫秒
+conn.pexpire('key-name',320000)  # 在指定的毫秒后过期
+
+
+
 
 
 

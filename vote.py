@@ -1,7 +1,7 @@
 import time
 
 import redis
-
+# 文章投票
 ONE_WEEK_IN_SECONDS = 7 * 86400
 VOTE_SCORE = 666
 conn = redis.Redis()

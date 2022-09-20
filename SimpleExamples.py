@@ -1,3 +1,5 @@
+import json
+
 import redis
 import time
 conn = redis.Redis()
@@ -61,21 +63,48 @@ def cache_rows():
         row_id = next[0][0]
 
         delay = conn.zscore('delay:', row_id)
-        if delay < 0:
-
-        row = Invetory
-
+        if delay <= 0:
+            conn.zrem("delay:",row_id)
+            conn.zrem("schedule",row_id)
+            conn.delete("inv:"+row_id)
+            continue
+        row = Inventory.get(row_id)
+        conn.zadd('schedule:',row_id,now+delay)
+        conn.set('inv:'+row_id,json.dumps(row.to_dict))
 
 # website analysis
 
-def update_token(token, usr, item=None):
+def limited_update_token(token, usr, item=None):
+    timestamp = time.time()
+    conn.hset('login:', token, usr)
+    conn.zadd('recent:', token, timestamp)
 
-
+    # 记录浏览过的商品
+    if item:
+        conn.zadd('viewed:' + token, usr)
+        conn.zremrangebyrank('viewed:', token, 0, -26)
+        conn.zincrby('view:', item, -1)
 
 def rescale_viewed():
+    while not QUIT:
+        conn.zremrangebyrank('viewed:',0,-200001)
+        conn.zinterstore('viewed:',{'viewed:': .5})
+        time.sleep(300)
 
+def extract_item_id(request):
+    return None
+
+def is_dynamic(request):
+    return None
 
 def can_cache(request):
+    item_id = extract_item_id(request)
+    if not item_id or is_dynamic(request):
+        return False
+    rank = conn.zrank('viewed:', item_id)
+    return rank is not None and rank < 10000
+
+
 
 
 

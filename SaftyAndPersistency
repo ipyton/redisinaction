@@ -1,0 +1,11 @@
+The following content is used for informing me of persistency of redis.
+
+RDB script:
+save 60 1000 #
+stop-writes-on-bgsave-error no
+rdbcompression yes
+dbfilename dump.rdb
+
+AOF script:
+appendonly no
+appendfsync everysec
