@@ -2,6 +2,7 @@
 import bisect
 import contextlib
 import csv
+import functools
 import json
 import logging
 import time
@@ -280,9 +281,28 @@ def get_config(type, component, wait=1):
             CONFIGS[key] = config
     return CONFIGS.get(key)
 
+
+REDIS_CONNECTIONS = {}
+
+# 有参装饰器怎么办？ 套三层,做的是，在
 def redis_connection(component, wait=1):
+    key = 'config:redis:' +component
+    def wrapper(function):
+        @functools.wraps(function)
+        def call(*args, **kwargs):
+            old_config = CONFIGS.get(key, object())
+            _config = get_config('redis', component, wait)
+            config = {}
+            for k, v in _config.iteritems():
+                config[k.encode('utf-8')] = v
 
+            if old_config != _config:
+                REDIS_CONNECTIONS[key] = redis.Redis(**config)
 
+            return function(REDIS_CONNECTIONS.get(key), *args, **kwargs)
+
+        return call
+    return wrapper
 @redis_connection('logs')
 def log_recent(conn, app, message):
     'the old log_recent() code'
