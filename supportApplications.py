@@ -33,6 +33,7 @@ def log_recent(name, message, severity=logging.INFO, pipe=None):
     pipe.ltrim(destination, 0, 99)
     pipe.execute()
 
+
 def log_common( name, message, severity = logging.INFO, timeout = 5):
     severity = str(SEVERITY.get(severity)).lower()
     destination = 'common:%s:%s' % (name, severity)
@@ -74,6 +75,7 @@ def update_counter(name, count=1, now=None):
         pipe.hincrby('count:' + hash, pnow, count)
     pipe.execute()
 
+
 def get_counter(name, precision):
     hash = '%s:%s' % (precision, name)
     data = conn.hgetall('count:' + hash)
@@ -82,6 +84,7 @@ def get_counter(name, precision):
         to_return.append((int(key), int(value)))
     to_return.sort()
     return to_return
+
 
 SAMPLE_COUNT = 10
 def clean_counters():
@@ -126,10 +129,6 @@ def clean_counters():
         passes+=1
         duration = min(int(time.time() -start) + 1, 60)
         time.sleep(max(60-duration), 1)
-
-
-
-
 
 
 # 存储统计数据
@@ -178,6 +177,7 @@ def get_stats(context, type):
     data['stddev'] = (numerator / (data['count'] - 1 or 1)) ** .5
     return data
 
+
 @contextlib.contextmanager
 def access_time(context):
     start = time.time()
@@ -206,6 +206,7 @@ def ip_to_score(ip_address):
     for v in ip_address.split('.'):
         score = score * 256 + int(v, 10)
     return score
+
 
 def import_ips_to_redis(file_name):
     csv_file = csv.reader(open(file_name, 'rb'))
@@ -263,11 +264,14 @@ def is_under_maintenance():
         )
         return IS_UNDER_MAINTENANCE
 
+
 def set_config(type, component, config):
     conn.set('config:%s:%s' % (type, component),json.dumps(config))
 
+
 CONFIGS = {}
 CHECKED = {}
+
 
 def get_config(type, component, wait=1):
     key = 'config:%s:%s' % (type, component)
@@ -284,7 +288,8 @@ def get_config(type, component, wait=1):
 
 REDIS_CONNECTIONS = {}
 
-# 有参装饰器怎么办？ 套三层,做的是，在
+
+# 有参装饰器怎么办？ 套三层,做的是，封装了提前查redis的逻辑。
 def redis_connection(component, wait=1):
     key = 'config:redis:' +component
     def wrapper(function):
@@ -298,11 +303,128 @@ def redis_connection(component, wait=1):
 
             if old_config != _config:
                 REDIS_CONNECTIONS[key] = redis.Redis(**config)
-
             return function(REDIS_CONNECTIONS.get(key), *args, **kwargs)
-
         return call
     return wrapper
+
+
+#
 @redis_connection('logs')
 def log_recent(conn, app, message):
     'the old log_recent() code'
+
+
+#自动补全联系人
+def add_update_contact(user, contact):
+    ac_list = 'recent:' + user
+    pipeline = conn.pipeline(True)
+    pipeline.lrem(ac_list, contact)
+    pipeline.lpush(ac_list, contact)  # 更新
+    pipeline.ltrim(ac_list, 0, 99)
+    pipeline.execute()
+
+
+def remove_contact(user, contact):
+    conn.lrem('recent:' + user, contact)
+
+
+def fetch_autocompelete_list(user, prefix):
+    candidates = conn.lrange('recent:' + user, 0, -1)
+    matches = []
+    for candidate in candidates:
+        if candidate.lower().startswith(prefix):
+            matches.append(candidate)
+    return matches
+
+
+valid_charaters = '`abcdefghijklmnopqrstuvwxyz{'
+def find_prefix_range(prefix):
+    posn = bisect.bisect_left(valid_charaters, prefix[-1:])
+    suffix = valid_charaters[(posn or 1) - 1]
+    return prefix[:-1] + suffix + '{',prefix + '{'
+
+
+def autocompelete_on_prefix(guild, prefix):
+
+
+
+def join_guild():
+
+
+
+def leave_guild():
+
+
+
+# distributed lock
+def acquire_lock():
+
+
+def purchase_item_with_lock():
+
+
+def release_lock(lockname, identifier):
+
+
+def acquire_lock_with_timeout():
+
+
+def acquire_semaphore():
+
+
+def release_semaphore():
+
+
+def acquire_fair_semaphore():
+
+
+def release_fair_semaphore():
+
+def refresh_fair_semophore():
+
+
+def acquire_semaphore_with_lock():
+
+
+# task queue
+def send_sold_email_via_queue():
+
+
+def process_sold_email_queue():
+
+def worker_watch_queue():
+
+def worker_watch_queues():
+
+def execute_later():
+
+def poll_queue():
+
+
+# message pull
+def create_chat():
+
+def send_message():
+
+def fetch_pending_messages():
+
+def join_chat():
+
+def leave_chat():
+
+
+# distribute the files
+def daily_country_aggregate():
+
+
+def copy_logs_to_redis():
+
+
+def process_log_from_redis():
+
+def readlines():
+
+def readblock():
+
+def readblocks_gz():
+
