@@ -8,7 +8,7 @@ import logging
 import time
 import datetime
 import uuid
-
+import math
 import redis
 
 conn = redis.Redis("8.8.8.8")
@@ -337,6 +337,11 @@ def fetch_autocompelete_list(user, prefix):
     return matches
 
 
+
+'''
+ab` 位于aba 之前 ，aba{位于abaxxxx之后。
+这个做法太聪明了!!!!
+'''
 valid_charaters = '`abcdefghijklmnopqrstuvwxyz{'
 def find_prefix_range(prefix):
     posn = bisect.bisect_left(valid_charaters, prefix[-1:])
@@ -344,87 +349,239 @@ def find_prefix_range(prefix):
     return prefix[:-1] + suffix + '{',prefix + '{'
 
 
-def autocompelete_on_prefix(guild, prefix):
+
+def autocomplete_on_prefix(guild, prefix):
+    start, end = find_prefix_range(prefix)
+    identifier = str(uuid.uuid4())
+    start += identifier
+    end += identifier
+
+    zset_name = 'members:' + guild
+
+    conn.zadd(zset_name, start, 0 ,end, 0)
+    pipeline = conn.pipeline(True)
+    while True:
+        try:
+            pipeline.watch(zset_name)
+            sindex = pipeline.zrank(zset_name, start)
+            eindex = pipeline.zrank(zset_name, end)
+            erange = min(sindex + 9, eindex - 2)
+            pipeline.multi()
+            pipeline.zrem(zset_name, start, end)
+            pipeline.zrange(zset_name, sindex, erange)
+            items = pipeline.execute()[-1]
+            break
+        except redis.exceptions.WatchError:
+            continue
+    return [item for item in items if '{' not in item]
 
 
+def join_guild(guild, user):
+    conn.zadd('members:' + guild, user, 0)
 
-def join_guild():
 
-
-
-def leave_guild():
-
+def leave_guild(guild, user):
+    conn.zrem('members:' + guild, user)
 
 
 # distributed lock
-def acquire_lock():
+def acquire_lock(lockname, acquire_timeout = 10):
+    identifier = str(uuid.uuid4())
+    end = time.time() + acquire_timeout
+    while time.time() < end:
+        if conn.setnx():
+            return identifier
+        time.sleep(.001)
+    return False
 
 
-def purchase_item_with_lock():
+def purchase_item_with_lock(buyerid, itemid, sellerid):
+    buyer = "users:%s" % buyerid
+    seller = "users:%s" % sellerid
+    item = "%s.%s" % (itemid, sellerid)
+    inventory = "inventory:%s" % buyerid
+
+    locked = acquire_lock(sellerid)
+    if not locked:
+        return False
+    pipe = conn.pipeline(True)
+    try:
+        pipe.zscore("market:", item)
+        pipe.hget(buyer, 'funds')
+        price, funds = pipe.execute()
+        if price is None or price > funds:
+            return None
+
+        pipe.hincrby(seller, 'funds', int(price))
+        pipe.hincrby(buyer, 'funds', int(-price))
+        pipe.sadd(inventory, itemid)
+        pipe.zrem('market:', item)
+        pipe.execute()
+        return True
+    finally:
+        release_lock(sellerid, locked)
 
 
 def release_lock(lockname, identifier):
+    pipe = conn.pipeline(True)
+    lockname = 'lock:' + lockname
+
+    while True:
+        try:
+            pipe.watch(lockname) # 可以设置锁的粒度
+            if pipe.get(lockname) == identifier:
+                pipe.multi()
+                pipe.delete(lockname)
+                pipe.execute()
+                return True
+            pipe.unwatch()
+            break
+        except redis.exceptions.WatchError:
+            pass
+
+    return False
 
 
-def acquire_lock_with_timeout():
+def acquire_lock_with_timeout(lockname, acquire_timeout=10, lock_timeout=10):
+    identifier = str(uuid.uuid4())
+    lockname = 'lock:' + lockname
+    lock_timeout = int(math.ceil(lock_timeout))
+
+    end = time.time() + acquire_timeout
+    while time.time() < end:
+        if conn.setnx(lockname, identifier):
+            conn.expire(lockname, lock_timeout)
+            return identifier
+        elif not conn.ttl(lockname):
+            conn.expire(lockname, lock_timeout)
+        time.sleep(.001)
+    return False
 
 
-def acquire_semaphore():
+def acquire_semaphore(semname, limit, timeout=10):
+    identifier = str(uuid.uuid4())
+    now = time.time()
+
+    pipeline = conn.pipeline(True)
+    pipeline.zremrangebyscore(semname, '-inf', now - timeout) # 清理过期信号量持有者
+    pipeline.zadd(semname, identifier, now)
+    pipeline.zrank(semname, identifier) # 检查是否成功获得了信号量
+    if pipeline.execute()[-1] < limit:
+        return identifier
+
+    conn.zrem(semname, identifier)  # 获取信号量失败
+    return None
 
 
-def release_semaphore():
+def release_semaphore(semname, identifier):
+    return conn.zrem(semname, identifier)
 
 
-def acquire_fair_semaphore():
+def acquire_fair_semaphore(semname, limit, timeout=10):
+    identifier = str(uuid.uuid4())
+    czset = semname + ':owener'
+    ctr = semname + ':counter'
+
+    now = time.time()
+    pipeline = conn.pipeline(True)
+    pipeline.zremrangebyscore(semname, '-inf', now - timeout)
+    pipeline.zinterstore(czset, {czset: 1, semname: 0})
+
+    pipeline.incr(ctr)
+    counter = pipeline.execute()[-1]
+
+    pipeline.zadd(semname, identifier, now)
+    pipeline.zadd(czset, identifier, counter)
+
+    pipeline.zrank(czset, identifier)
+
+    if pipeline.execute()[-1] < limit:
+        return identifier
+    pipeline.zrem(semname, identifier, now)
+    pipeline.zrem(czset, identifier)
+    pipeline.execute()
+    return None
 
 
-def release_fair_semaphore():
+def release_fair_semaphore(semname, identifier):
+    pipeline = conn.pipeline(True)
+    pipeline.zrem(semname, identifier)
+    pipeline.zrem(semname + ':owner'. identifier)
+    return pipeline.execute()[0]
 
-def refresh_fair_semophore():
+
+def refresh_fair_semaphore(semname, identifier):
+    if conn.zadd(semname, identifier, time.time()):
+        release_fair_semaphore(semname, identifier)
+        return False
+    return True
 
 
-def acquire_semaphore_with_lock():
+def acquire_semaphore_with_lock(semname, limit, timeout=10):
+    identifier = acquire_lock(semname, acquire_timeout= .01)
+    if identifier:
+        try:
+            return acquire_fair_semaphore(semname, limit, timeout)
+        finally:
+            release_lock(semname, identifier)
 
 
 # task queue
-def send_sold_email_via_queue():
+def send_sold_email_via_queue(seller, item, price, buyer):
+    data = {
+        'seller_id': seller,
+        'item_id': item,
+        'price': price,
+        'buyer_id': buyer,
+        'time': time.time()
+    }
+    conn.rpush('queue:email', json.dumps(data))
 
 
+QUIT = False
 def process_sold_email_queue():
+    while not QUIT:
+        packed = conn.blpop(['queue:email'], 30)
 
-def worker_watch_queue():
+        if not packed:
+            continue
 
-def worker_watch_queues():
+        to_send = json.loads(packed[1])
+        try:
 
-def execute_later():
+
+def worker_watch_queue(queue, callbacks):
+
+def worker_watch_queues(queue, callbacks):
+
+def execute_later(queue, name, args, delay=0):
 
 def poll_queue():
 
 
 # message pull
-def create_chat():
+def create_chat(sender, recipients, message, chat_id=None):
 
-def send_message():
+def send_message(chat_id, sender, message):
 
-def fetch_pending_messages():
+def fetch_pending_messages(recipient):
 
-def join_chat():
+def join_chat(chat_id, user):
 
-def leave_chat():
+def leave_chat(char_id, user):
 
 
 # distribute the files
-def daily_country_aggregate():
+def daily_country_aggregate(line):
 
 
-def copy_logs_to_redis():
+def copy_logs_to_redis(path, channel, count=10, limit=2**30):
 
 
-def process_log_from_redis():
+def process_log_from_redis(id, callback):
 
-def readlines():
+def readlines(key, rblocks):
 
-def readblock():
+def readblock(key, blocksize=2**17):
 
-def readblocks_gz():
-
+def readblocks_gz(key):

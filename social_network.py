@@ -1,4 +1,16 @@
-def create_user():
+import redis
+import
+conn = redis.Redis('localhost:8080')
+
+def create_user(login, name):
+    llogin = login.lower()
+    lock = acquire_lock_with_timeout(conn, 'user:' + llogin, 1)
+    if not lock:
+        return None
+
+    if conn.get('users:', llogin):
+        release_lock()
+
 
 def create_status():
 
