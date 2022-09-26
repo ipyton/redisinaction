@@ -5,11 +5,19 @@ import csv
 import functools
 import json
 import logging
+import os
 import time
 import datetime
 import uuid
 import math
 import redis
+
+'''
+用于形参时
+* 未匹配的位置参数
+** 未匹配的关键字参数
+'''
+
 
 conn = redis.Redis("8.8.8.8")
 
@@ -538,6 +546,11 @@ def send_sold_email_via_queue(seller, item, price, buyer):
     conn.rpush('queue:email', json.dumps(data))
 
 
+def fetch_data_and_send_sold_email(content):
+    # do something to send email
+    pass
+
+
 QUIT = False
 def process_sold_email_queue():
     while not QUIT:
@@ -548,16 +561,64 @@ def process_sold_email_queue():
 
         to_send = json.loads(packed[1])
         try:
+            fetch_data_and_send_sold_email(to_send)
+        except Exception:
+            print("failed!!")
+        else:
+            print('success')
 
 
 def worker_watch_queue(queue, callbacks):
+    while not QUIT:
+        packed = conn.blpop([queue], 30)
+        if not packed:
+            continue
+        name, args = json.loads(packed[1])
+        if name not in callbacks:
+            print("Unknown callback %s" % name)
+            continue
+        callbacks[name](*args) # 解包裹
+
 
 def worker_watch_queues(queue, callbacks):
+    while not QUIT:
+        packed = conn.blpop(queue, 30)
+        if not packed:
+            continue
+        name, args = json.loads(packed[1])
+        if name not in callbacks:
+            print("error")
+            continue
+        callbacks[name](*args)
 
 def execute_later(queue, name, args, delay=0):
+    identifier =str(uuid.uuid4())
+    item = json.dumps([identifier, queue, name, args])
+    if delay> 0:
+        conn.zadd('delayed:', item, time.time() + delay)
+    else:
+        conn.rpush('queue:' + queue, item)
+    return identifier
 
+#从延时队列中取数据出来
 def poll_queue():
+    while not QUIT:
+        item = conn.zrange('delayed:', 0, 0,withscores=True)
+        if not item or item[0][1] > time.time():
+            time.sleep(.01)
+            continue
 
+        item = item[0][0]
+        identifier, queue, function, args = json.loads(item)
+
+        locked = acquire_lock(identifier)
+        if not locked:
+            continue
+        if conn.zrem('delay:', item):
+            conn.rpush('queue:' + queue, item)
+        release_lock(identifier, locked)
+
+# 优先级队列 + 延时队列
 
 # message pull
 def create_chat(sender, recipients, message, chat_id=None):
@@ -571,17 +632,85 @@ def join_chat(chat_id, user):
 def leave_chat(char_id, user):
 
 
+aggregates = defaultdict(lambda: defaultdict(int))
 # distribute the files
 def daily_country_aggregate(line):
-
+    if line:
+        line = line.split()
+        ip = line[0]
+        day = line[1]
+        country = find_city_by_ip(ip)[2]
+        aggregates[day][country] += 1
+        return
+    for day, aggregate in aggregates.items():
+        conn.zadd('daily:country:' + day, **aggregate)
+        del aggregates[day]
 
 def copy_logs_to_redis(path, channel, count=10, limit=2**30):
+    bytes_in_redis = 0
+    waiting = deque()
+    create_chat()
+    count = str(count)
+    for logfile in sorted(os.listdir(path)):
+        full_path = os.path.join(os.listdir)
+
 
 
 def process_log_from_redis(id, callback):
+    while True:
+
 
 def readlines(key, rblocks):
+    out = ''
+    for block in rblocks(key):
+        out += block
+        posn = out.rfind('\n')
+        if posn >= 0:
+            for line in out[:posn].split('\n'):
+                yield line + '\n'
+            out = out[posn+1:]
+        if not block:
+            yield out
+            break
 
-def readblock(key, blocksize=2**17):
 
+def readblocks(key, blocksize=2**17):
+    lb = blocksize
+    pos = 0
+    while lb == blocksize:
+        block = conn.substr(key, pos, pos + blocksize - 1)
+        yield block
+        lb = len(block)
+        pos += lb
+    yield ''
+
+# 压缩一下
 def readblocks_gz(key):
+    inp = ''
+    decoder = None
+    for block in readblocks(key, 2**17):
+        if not decoder:
+            inp += block
+            try:
+                if inp[:3] != '\x1f\x8b\x08': # ????
+                    raise IOError("invalid gzip data")
+                i = 10
+                flag = ord(inp[3])
+
+                if flag & 4:
+                    i += 2 + ord(inp[i]) + 256*ord(inp[i+1])
+                if flag & 8:
+                    i = inp.index('\0', i) + 1
+                if flag & 16:
+                    i = inp.index('\0', i) + 1
+                if flag & 2:
+                    i += 2
+
+                if i > len(inp):
+                    raise IndexError("not enough data")
+            except (IndexError, ValueError):
+                continue
+
+            else:
+                block = inp[i:]
+
